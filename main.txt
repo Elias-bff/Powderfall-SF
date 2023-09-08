@@ -1,0 +1,392 @@
+--@name PowderFall.Main
+--@author Elias
+--@include scripts/elements.txt
+--@include scripts/shapes.txt
+
+switch=function(p,t)
+    if t[p] then 
+        return t[p]
+    end 
+end
+
+if SERVER then
+    local src=chip():isWeldedTo()
+    
+    if src then
+        src:linkComponent(chip())
+    else
+        chip():remove()
+    end
+else
+    require("scripts/elements.txt")
+    require("scripts/shapes.txt")
+    
+    local icons={
+        ["resultset_first"]=material.createFromImage("icon16/resultset_first.png",""),
+        ["resultset_next"]=material.createFromImage("icon16/resultset_next.png",""),
+        ["arrow_refresh"]=material.createFromImage("icon16/arrow_refresh.png","")
+    }
+    local window=class("window")
+    local fps_delta=0
+    local lastKeys={}
+    local hitboxes={}
+    local windows={}
+    blocks={}
+    scale=5
+    data={
+        element="water",
+        periodic=false,
+        pause=false,
+        first=true,
+        frame=0,
+        scale=0,
+        srcx=0
+    }
+    x,y=0,0
+    render.createRenderTarget("game")
+    render.createRenderTarget("ui")
+    
+    local h1=render.createFont(
+        'Default',
+        15,
+        500,
+        true
+    )
+    
+    for k,v in pairs(elements) do
+        if k!=1 then
+            elements[1][elements[k][1][1]][k]=elements[k][1][2]
+        end
+    end
+          
+    function lastKey(key,state)
+        if !lastKeys[key] then
+            lastKeys[key]={true,true} 
+        end
+        
+        hook.add("think","lastKey_"..key,function()
+            if (!input.isKeyDown(key) and !input.isMouseDown(key)) then
+                lastKeys[key][1]=false
+                
+                if !lastKeys[key][2] then 
+                    lastKeys[key][2]=true 
+                else 
+                    lastKeys[key][2]=false 
+                end
+                
+                hook.remove("think","lastKey_"..key)
+            end
+        end)
+        
+        return lastKeys[key][2]
+    end
+
+    function drawHitbox(id,x,y,x2,y2,callBack,hoverFunction,closeEvent)
+        if hitboxes[id] then
+            if hitboxes[id][4] and hoverFunction then
+                hoverFunction()
+            end
+
+            if closeEvent then
+                closeEvent()
+            end
+
+            return
+        end
+        
+        hitboxes[id]={
+            Vector(x,y),
+            Vector(x+x2,y+y2),
+            callBack,
+            true
+        }
+    end
+    
+    function drawOutlineHitbox(id,x,y,x2,y2,callBack,hoverFunction,closeEvent,width)
+        drawHitbox(id,x,y,x2,y2,callBack,hoverFunction)
+        render.drawRectOutline(x,y,x2,y2,width)
+        if closeEvent then
+            closeEvent()
+        end
+    end
+    
+    hook.add("mouseWheeled","",function(delta)
+        if data.active then
+            data.scale=math.clamp(data.scale+delta*(!input.isKeyDown(79) and scale*2 or scale*10),0,2048)
+        end
+    end)
+    
+    hook.add("renderoffscreen","game",function()
+        render.setFilterMag(1)
+        render.setFilterMin(1)
+        
+        render.selectRenderTarget("game")
+           
+        local now=timer.systime()
+        
+        if data.frame<=now then 
+            data.frame=now+fps_delta
+            
+            render.clear(Color(0,0,0,0)) 
+            
+            if !data.pause then
+                local calcu=blocks
+            
+                for xy,pixel in pairs(calcu) do
+                    local index=xy
+                    local xy=string.explode(",",xy)
+                    local x=tonumber(xy[1])
+                    local y=tonumber(xy[2]) 
+                    
+                    if x<0||x>(512/data.srcx)||y<0||y>512 then
+                        calcu[index]=nil
+                    end 
+                    
+                    local map=switch(pixel[1],elements)
+                    local phys=map[3]
+                    pixel[3]=map[2]
+                    pixel[4]={
+                        map[1][3],
+                        map[1][6],
+                        phys and true or false
+                    }
+                    
+                    if phys and calcu[index] then
+                        for yCheck,step in pairs(phys) do
+                            if map[1][4] and tonumber(yCheck)>0 then
+                                local block=calcu[x..","..y+yCheck*scale]
+                                
+                                if !block then
+                                    calcu[x..","..y]=nil
+                                    calcu[x..","..y+yCheck*scale]=pixel
+                                    break
+                                end
+                                
+                                if block[4] and block[4][1]<pixel[4][1] then
+                                    calcu[x..","..y]=calcu[x..","..y+yCheck*scale]
+                                    calcu[x..","..y+yCheck*scale]=pixel
+                                    break
+                                end
+                            end
+                            
+                            if map[1][5] and math.random()>0.5 then
+                                step=table.reverse(step)
+                            end
+                            
+                            for xCheck,yy in pairs(step) do
+                                if yy!="XX" and tonumber(yCheck)<=0 then
+                                    local block=calcu[x+(xCheck-2)*scale..","..y+yCheck*scale]
+                                    
+                                    if !block and yy[1]=="MV" and !yy[2] then
+                                        calcu[x..","..y]=nil
+                                        calcu[x+(xCheck-2)*scale..","..y+yCheck*scale]=pixel
+                                        break
+                                    end
+                                    
+                                    if block and block[4] and ((block[4][1]<pixel[4][1] and (yy[2]==block[1] or !yy[2])) or yy[1]=="MV" and yy[2]==block[1]) then
+                                        if yy[1]=="MV" then
+                                            calcu[x..","..y]=calcu[x+(xCheck-2)*scale..","..y+yCheck*scale]
+                                        end
+                                        
+                                        calcu[x+(xCheck-2)*scale..","..y+yCheck*scale]=yy[1]=="MV" and pixel or {pixel[1]}
+                                        break
+                                    end
+                                end
+                            end
+                        end
+                    end        
+                end
+                
+                blocks=calcu
+            end
+            
+            for xy,pixel in pairs(blocks) do
+                local xy=string.explode(",",xy)
+                local x=tonumber(xy[1])
+                local y=tonumber(xy[2]) 
+                
+                if !pixel[2] and !pixel[4][2] then
+                    pixel[2]=table.random(pixel[3])
+                    pixel[3]=nil
+                end
+                
+                render.setColor(Color(pixel[2][1],pixel[2][2],pixel[2][3]):hsvToRGB())
+                render.drawRectFast(x,y,scale,scale)
+            end
+        end
+    end)
+    
+    hook.add("renderoffscreen","ui",function()
+        render.setFilterMag(1)
+        render.setFilterMin(1)
+        
+        render.selectRenderTarget("ui")
+        render.clear(Color(0,0,0,0))
+        
+        if !data.periodic then
+            render.setColor(Color(255,255,255,150))
+            render.drawRectFast(math.floor(x/scale)*scale-data.scale/2,math.floor(y/scale)*scale-data.scale/2,scale+data.scale,scale+data.scale)
+        end
+    end)
+    
+    hook.add("render","",function()
+        render.setFilterMag(1)
+        render.setFilterMin(1)
+        
+        local mousex,mousey=render.cursorPos()
+        data.fps=math.clamp(math.floor(math.floor(cpuMax()*100000)/math.floor(cpuAverage()*10000)),0,1000)
+        data.active=(mousex and player():getEyeTrace().Entity:getClass()=="starfall_screen" and player():isAlive() and !player():isTyping())
+        fps_delta=2/data.fps
+        
+        if data.first then
+            data.srcx=render.getScreenInfo(render.getScreenEntity())["RatioX"]
+            
+            line(0,0,512,0,{"solid"})
+            line(0,512,512,512,{"solid"})
+            line(0,0,0,512,{"solid"})
+            line(512/data.srcx,0,512/data.srcx,512,{"solid"})
+            data.first=false
+            
+            box(200,200,400,400,{"solid"})
+        end
+        
+        if !data.pause and quotaAverage()>quotaMax()*0.9 then
+            lastKeys[30]={false,false}
+            data.pause=true
+        end
+
+        render.setColor(Color(255,255,255))
+        render.setRenderTargetTexture("game")
+        render.drawTexturedRect(0,0,1024-scale/4,1024-scale/2)
+        
+        if data.active then
+            x=math.floor((mousex+scale/4)/scale)*scale
+            y=math.floor((mousey+scale/4)/scale)*scale
+
+            if input.isKeyDown(15) and data.active and !data.periodic then
+                box(x-data.scale/2,y-data.scale/2,x+data.scale/2,y+data.scale/2,{data.element})
+            end
+            if input.isKeyDown(28) and !input.isKeyDown(81)  then
+                box(x-data.scale/2,y-data.scale/2,x+data.scale/2,y+data.scale/2,nil)
+            end
+            if input.isKeyDown(28) and input.isKeyDown(81)  then
+                data.periodic=lastKey(81,data.periodic)
+            end
+            if input.isKeyDown(30) then
+                data.pause=lastKey(30,data.pause)
+            end
+            
+            render.setRenderTargetTexture("ui")
+            render.drawTexturedRect(0,0,1024-scale/4,1024-scale/2)
+        end   
+        
+        render.setFont("DermaDefault")
+        render.setColor(Color(255,255,255))
+        render.drawSimpleText(scale*1.25,scale+3,"FPS: "..data.fps.."; X:"..x.." Y:"..y)
+        render.drawText(scale*1.25,scale+3+15, "Quota Used: " .. math.round(quotaUsed() * 1000000) .. "us")
+        render.drawText(scale*1.25,scale+3+(15*2), "Pixels: " .. table.count(blocks))
+        
+        if data.periodic then
+            render.setColor(Color(15,17,22,250))
+            render.drawRectFast(0,0,512/data.srcx,512)
+            
+            local index=0
+            
+            for k,v in pairs(elements[1]) do
+                local hover=function()render.setColor(Color(255,255,255))end
+                local recall=function()render.setColor(Color(200,200,200))end
+                local i=0
+                
+                render.setColor(Color(200,200,200))
+                render.setMaterial(icons["arrow_refresh"])
+                render.drawTexturedRect(512/data.srcx-46,25,20,20)
+                drawOutlineHitbox(1,512/data.srcx-50,20,30,30,function()
+                    blocks={}
+                    data.first=true
+                end,hover,recall,2)
+                
+                if data.pause then
+                    render.setMaterial(icons["resultset_first"])
+                else
+                    render.setMaterial(icons["resultset_next"])
+                end
+                
+                render.drawTexturedRect(512/data.srcx-46,25+35,20,20)
+                drawOutlineHitbox(2,512/data.srcx-50,20+35,30,30,function()
+                    if data.pause then
+                        data.pause=false
+                    else
+                        data.pause=true
+                    end
+                    lastKeys[30]={false,false}
+                end,hover,recall,2)
+                
+                render.setColor(elements[1][k][1])
+                
+                for kk,vv in pairs(v) do
+                    i=i+1
+                    
+                    if i!=1 then
+                        local x=vv[1]
+                        local y=vv[2]
+                        index=index+1
+                        
+                        render.setFont("DermaDefault")
+                        render.drawText(45+2.5+60*x,45+60*y,index)
+                        render.drawText(45+30.5+60*x,85+60*y,kk,1)
+                        drawOutlineHitbox(2+index,45+60*x,45+60*y,60,60,function()
+                            data.element=kk
+                            data.periodic=false
+                        end,nil,nil,1)
+                        
+                        local k=string.split(kk," ")
+                        local short=""
+                        
+                        for _,word in pairs(k) do
+                            short=short..string.upper(word[1])..word[3]
+                        end
+                        
+                        render.setFont("DermaLarge")
+                        render.drawText(45+29+60*x,60+60*y,short,1)
+                    end
+                end
+            end
+        elseif #hitboxes>0 then
+            hitboxes={}
+        end
+        
+--[[
+        for id, hitBox in pairs(hitboxes) do
+            local topLeft=hitBox[1]
+            local bottomRight=hitBox[2]
+            
+            render.setColor(Color(timer.realtime()*20+id*5,1,1):hsvToRGB())
+            render.drawLine(topLeft[1],topLeft[2],bottomRight[1],bottomRight[2])
+            render.drawRectOutline(topLeft[1],topLeft[2],bottomRight[1]-topLeft[1],bottomRight[2]-topLeft[2],1)
+        end
+]]
+    end)
+    
+    hook.add("think","cl_hitBoxes",function()
+        for i, hitBox in pairs(hitboxes) do
+            if Vector(x,y):withinAABox(hitBox[1],hitBox[2]) then
+                if !hitBox[4] then
+                    hitBox[4]=true
+                    if hitBox[3] then
+                        hook.add("inputPressed","hitId_"..i,function(key)
+                            if key==15 then
+                                hitBox[3]()
+                                return
+                            end
+                        end)
+                    end
+                end
+            else
+                if hitBox[4] then
+                    hitBox[4]=false
+                    hook.remove("inputPressed","hitId_"..i)
+                end
+            end
+        end
+    end)
+end

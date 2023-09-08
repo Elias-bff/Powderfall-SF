@@ -1,0 +1,303 @@
+--@name Pixel sand test
+--@author Elias
+    --wrapping
+    --anyone pressing e on the chip causes a error wipe event
+    --performance (duh)
+    --slimey and bad water
+    --grid system is weird af and causes some positions to be avoided entirely
+    --static fps
+    --checking quota to lower fps raises quota use by large margin
+    --active types tends to not update table
+    --pixel drop/physics unexpected results
+    --line only draws to 512x512
+--Current bugs: ^
+switch=function(p,t)
+    if t[p]then 
+        return t[p]()
+    end 
+end
+if SERVER then
+    local ent=chip():isWeldedTo()
+    
+    if ent then
+        ent:linkComponent(chip())
+    end
+    --wire.adjustOutputs({"Data"},{"String"})
+else    
+    local size=4    
+    local scale=20
+    local UPS=20
+    local next_frame,first=0,false
+    local fps_delta=1/UPS 
+    local blocks,active,la={},{},{}
+    local x,y
+    local replace=false
+    local Log=""
+    
+    setupPermissionRequest({"console.command"},"Runs commands in player's local console.",false)    
+    
+    if quotaMax()<0.05 then
+        size,UPS=12,20
+        
+        hook.add("permissionrequest","",function()
+            concmd("sf_timebuffer_cl_owner 0.05;sf_timebuffersoftlock_cl_owner 0")
+            
+            print("Ran: 'sf_timebuffer_cl_owner 0.5;sf_timebuffersoftlock_cl_owner 0'\n      - Restart your Starfall chip to confirm changes!")
+            
+            Log="Warning: Your resources for Starfall are too low!\n      - Restart your Starfall chip to confirm changes!\n"
+        end)
+        
+        if player()!=owner() then 
+            Log="Warning: Your resources for Starfall are too low! Settings automantically lowered.\n      - Ask the owner for commands to access full power.\n"
+        else 
+            Log="Warning: Your resources for Starfall are too low! Settings automantically lowered.\n      - Please click E on the chip to allocate more resources.\n"
+        end
+        
+        hook.add("starfallUsed","",function(a,b)
+            if b==chip() and player()==owner() then 
+                enableHud(a,true)
+                sendPermissionRequest()
+            end 
+        end)
+    end
+    
+    local elements={
+        solid=Color(255,255,255,150),
+        sand=Color(255,150,0,255),
+        water=Color(0,0,255,150)
+    }
+        
+    function drawLine(x,y,x2,y2,element,src,width)
+        local coords={}
+        local dx=math.abs(x2-x)
+        local dy=math.abs(y2-y)
+        local sx,sy
+        
+        if x<x2 then 
+            sx=1 
+        else 
+            sx=-1 
+        end
+        
+        if y<y2 then 
+            sy=1 
+        else 
+            sy=-1 
+        end
+        
+        local err=dx-dy
+        
+        for i=0,(x2-x)*2+(y2-y)*2,1 do
+            table.add(coords,{x%512,y})
+            --if x==x2 and y==y2 then return end
+            local e2=2*err
+            
+            if e2>-dy then 
+                err=err-dy
+                x=x+sx 
+            end
+            if e2<dx then
+                err=err+dx
+                y=y+sy 
+            end 
+        end
+        
+        for i=1,table.count(coords),2 do
+            local x=(math.floor(coords[i]/size)*size)
+            local y=(math.floor(coords[i+1]/size)*size)
+            
+            blocks[x+(y*512)]=element 
+        end 
+    end
+    
+    function box(x,y,x2,y2)
+        local coords={}
+        local width=(x2-x)/size
+        local height=(y2-y)/size
+        
+        for i=0,width,1 do 
+            for j=0,height,1 do 
+                table.add(coords,{x+i*size,y+j*size})
+            end 
+        end 
+        
+        return coords 
+    end
+    
+    function drawBox(x,y,x2,y2,element)
+        local coords=box(x,y,x2,y2)
+        for i=1,table.count(coords),2 do
+            local x=(math.floor(coords[i]/size)*size)
+            local y=(math.floor(coords[i+1]/size)*size)
+            
+            if blocks[x+(y*512)]==nil||element==nil then 
+                blocks[x+(y*512)]=element 
+            end 
+        end 
+    end
+    
+    function circle(x,y,diameter) --optimize later, produces the same amount of pixels regardless of size
+        local coords={}
+        
+        if diameter==1 then 
+            return {x,y}
+        end
+        
+        for i=x-diameter,x+diameter,1 do 
+            for j=y-diameter,y+diameter,1 do 
+                if math.pow(i-x,2)+math.pow(j-y,2)<=math.pow(diameter,2)then
+                    table.add(coords,{i,j})
+                end 
+            end 
+        end 
+        
+        return coords 
+    end
+    
+    function drawCircle(x,y,diameter,element)
+        local coords=circle(x,y,diameter)
+        
+        for i=1,table.count(coords),2 do 
+            local x=(math.floor(coords[i]/size)*size)
+            local y=(math.floor(coords[i+1]/size)*size)
+            
+            if blocks[x+(y*512)]==nil||element==nil then 
+                blocks[x+(y*512)]=element 
+            end 
+        end 
+    end
+    
+    function border(src)
+        src=math.floor(16/src)
+        
+        drawLine(0,0,512,0,"solid")
+        drawLine(0,510,512,510,"solid")
+        drawLine(0,0,0,512,"solid")
+        drawLine(510,0,510,510,"solid")
+    end
+    
+    drawBox(300,200,340,240,"solid")
+    drawCircle(200,200,70,"solid")
+    drawCircle(200,200,50,nil)
+    
+    hook.add("mouseWheeled","",function(a)
+        local shift=1
+        
+        if input.isKeyDown(79) then 
+            shift=10 
+        end
+        
+        scale=math.clamp(scale+a*shift,2,10^10)
+    end)
+    
+    hook.add("render","",function()
+        --if owner():getViewEntity()==render.getScreenEntity() then 
+        --    concmd("unbind mwheelup;unbind mwheeldown")
+        --else 
+        --    concmd("bind mwheelup invprev;bind mwheeldown invnext")end
+        local srcx=render.getScreenInfo(render.getScreenEntity())["x2"]  
+        
+        if !first then
+            border(srcx)
+            
+            first=true
+        end 
+        
+        render.drawText(size*1.5,size,"Size: "..size.."; Brush scale: "..scale.."; UPS (Updates per second): "..UPS.."\n"..Log.."Blocks: "..table.count(blocks).."\nActive types: "..table.toString(la).."\nBuffer time: "..math.round(chip():getQuotaAverage(),5))
+        
+        local mousex,mousey=render.cursorPos()
+        
+        if mousex!=nil then
+            x=math.floor(mousex/size)*size
+            y=math.floor(mousey/size)*size
+            
+            render.setColor(Color(255,255,255,100))
+            render.drawRectOutline(x-scale/2,y-scale/2,scale,scale)
+            
+            if !input.isMouseDown(107) and input.isKeyDown(15)then
+                if !input.isKeyDown(81) then
+                    --drawCircle(x,y,scale/2,"water")end
+                    drawBox(x-scale/2,y-scale/2,x+scale/2,y+scale/2,"water")
+                else
+                    --drawCircle(x,y,scale/2,nil)
+                    drawBox(x-scale/2,y-scale/2,x+scale/2,y+scale/2,nil)
+                end 
+            end 
+        end
+        
+        function step()
+            for k,v in pairs(blocks) do
+                local blockx=math.floor(k%512)
+                local blocky=math.floor(k/512)
+                local beneath=blockx+((blocky+size)*512)
+                local right
+                local left
+                local gravity=true
+                local moveable=true
+                
+                switch(blocks[k],{
+                    ["solid"]=function()
+                        moveable=false 
+                    end,
+                    ["sand"]=function()
+                        right=(blockx+size)+((blocky+size)*512)
+                        left=(blockx-size)+((blocky+size)*512)
+                    end,
+                    ["water"]=function()
+                        right=(blockx+size)+((blocky)*512)
+                        left=(blockx-size)+((blocky)*512)
+                    end
+                })
+                
+                if blockx<0||blocky>512||blockx>512*(math.round(srcx/16)) then 
+                    blocks[k]=nil 
+                    
+                    goto skip
+                end
+                
+                if !moveable||(blocks[right]!=nil and blocks[left]!=nil and blocks[beneath]!=nil) then 
+                    goto skip 
+                end
+                --if !active[blocks[k]] then 
+                --    active[blocks[k]]=0 
+                --else 
+                --    active[blocks[k]]=active[blocks[k]]+1 end
+                if gravity and blocks[beneath]==nil then
+                    blocks[beneath]=v
+                    blocks[k]=nil
+                elseif math.random()*2<1 and blocks[right]==nil then
+                    blocks[right]=v
+                    blocks[k]=nil
+                elseif blocks[left]==nil then
+                    blocks[left]=v
+                    blocks[k]=nil 
+                end
+                --render.setColor(Color(255,255,255))
+                --render.drawRectFast(blockx-size*250,blocky,size*500,size/2)
+                --render.drawRectFast(blockx,blocky-size*250,size/2,size*500)
+                la=active  
+                                 
+                ::skip::
+            end 
+        end
+        for k,v in pairs(blocks) do --math.max(quotaAverage(),quotaUsed())<quotaMax()*0.1
+            active={}
+            local now=timer.systime()
+            
+            if next_frame<now then 
+                next_frame=now+fps_delta
+                step()
+            end
+            
+            local blockx=k%1024
+            local blocky=k/512
+            
+            render.setColor(elements[v])
+            render.drawRectFast(blockx,blocky,size,size) --add mesh compiling later
+            
+            if input.isMouseDown(109) and y>400 then
+                render.drawRectFast(512,412,100,512)
+            end 
+        end 
+    end)
+end

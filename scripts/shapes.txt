@@ -1,0 +1,41 @@
+function box(x,y,x2,y2,element)
+    for i=x,x2,scale do 
+        for j=y,y2,scale do 
+            i=math.floor(i/scale)*scale
+            j=math.floor(j/scale)*scale
+            
+            if (!blocks[i..","..j] or !element) then
+                blocks[i..","..j]=element
+            end
+        end 
+    end 
+end
+function line(x,y,x2,y2,element) --redo later
+    local dx=math.abs(x2-x)
+    local dy=math.abs(y2-y)
+    local sx=x<x2 and 1 or -1
+    local sy=y<y2 and 1 or -1
+    local err=dx-dy
+    
+    if !blocks[x..","..y] then
+        blocks[math.floor(x/scale)*scale ..","..math.floor(y/scale)*scale]=element
+    end
+    
+    for i=1,(x2-x)*2+(y2-y)*2 do
+        local e2=2*err
+        
+        if e2>-dy then
+            err=err-dy
+            x=x+sx
+        end
+        
+        if e2<dx then
+            err=err+dx
+            y=y+sy
+        end    
+         
+        if !blocks[x..","..y] then
+            blocks[math.floor(x/scale)*scale ..","..math.floor(y/scale)*scale]=element
+        end
+    end
+end
